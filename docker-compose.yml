@@ -1,0 +1,31 @@
+services:
+  citasbackend:
+    build: ./citasBackend
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: 8080
+      DB_URL: jdbc:mysql://nuevo_citas:3306/citasBackend?useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true&serverTimezone=UTC
+      DB_USER_NAME: root
+      DB_PASSWORD: 2023
+    restart: always
+    depends_on:
+      nuevo_citas:
+        condition: service_healthy
+
+  nuevo_citas:
+    image: mysql:8.0.33
+    ports:
+      - "3304:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 2023
+      MYSQL_DATABASE: citasBackend
+    restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 10
+   
+
+   
