@@ -113,6 +113,7 @@ public class CitaService {
     }
     public CitaResponseDTO crearCita(CitaDTO citaDTO) {
         validarFechaCita(citaDTO.getFechaCita());
+        validarLimiteCitasPorDia(citaDTO.getTelefono(), citaDTO.getFechaCita());
         validarSolapamiento(citaDTO, null);
 
         Cita nuevaCita = crearEntidadCita(citaDTO);
@@ -133,6 +134,16 @@ public class CitaService {
         Cita citaExistente = citaRepository.findByUuid(UUID.fromString(uuid))
                 .orElseThrow(() -> new RegistroNoEncontrado("Cita no encontrada"));
 
+        Servicio servicio = servicioRepository.findById(citaDTO.getServicioId())
+                .orElseThrow(() -> new RegistroNoEncontrado("El servicio con ID " + citaDTO.getServicioId() + " no existe"));
+
+        if ((citaExistente.getEstatus().equalsIgnoreCase("f") ||
+                citaExistente.getEstatus().equalsIgnoreCase("c"))
+                && citaDTO.getEstatus().equalsIgnoreCase("a")
+        ) {
+            throw new EstatusInvalidoException("No se puede activar una cita finalizada o cancelada. ");
+        }
+
         validarFechaCita(citaDTO.getFechaCita());
         validarSolapamiento(citaDTO, UUID.fromString(uuid));
 
@@ -142,6 +153,7 @@ public class CitaService {
         citaExistente.setNombrePaciente(citaDTO.getNombrePaciente());
         citaExistente.setTelefono(citaDTO.getTelefono());
         citaExistente.setEstatus(citaDTO.getEstatus());
+        citaExistente.setServicio(servicio);
 
         Cita citaActualizada = citaRepository.save(citaExistente);
 
@@ -202,6 +214,20 @@ public class CitaService {
         }
     }
 
+    private void validarLimiteCitasPorDia(String telefono, LocalDate fechaCita) {
+        // Contar citas del mismo teléfono en ese día
+        long cantidadCitas = citaRepository.countByTelefonoAndFechaCita(
+                telefono,
+                fechaCita
+        );
+
+        if (cantidadCitas >= 4) {
+            throw new LimteCitasException(
+                    String.format("Ya se alcanzó el límite de 4 citas por día para el número de teléfono %s ", telefono)
+            );
+        }
+    }
+
     private Cita crearEntidadCita(CitaDTO dto) {
 
         if (dto.getServicioId() == null) {
@@ -247,10 +273,6 @@ public class CitaService {
         LocalDateTime ahora = LocalDateTime.now();
         LocalDateTime citaDateTime = citaExistente.getFechaCita().atTime(citaExistente.getHoraInicio());
 
-        if ("X".equalsIgnoreCase(citaExistente.getEstatus())) {
-            throw new CancelarCitaException("Cita ya cancelada");
-        }
-
         if (citaExistente.getFechaCita().isBefore(LocalDate.now())) {
             throw new CancelarCitaException("No se puede cancelar una cita en una fecha anterior a la actual");
         }
@@ -259,17 +281,17 @@ public class CitaService {
             throw new CancelarCitaException("No se puede cancelar con menos de 24 horas de anticipación");
         }
 
-        citaExistente.setEstatus("X");
-        Cita citaCancelada = citaRepository.save(citaExistente);
-
-        // Enviar notificación de cancelación
+        // Enviar notificación de cancelación antes de eliminar
         try {
-            whatsAppService.enviarCancelacionCita(citaCancelada);
+            whatsAppService.enviarCancelacionCita(citaExistente);
         } catch (Exception e) {
             System.err.println("Advertencia: Cita cancelada pero WhatsApp falló: " + e.getMessage());
         }
 
-        return construirRespuesta(citaCancelada, "Cita cancelada");
+        // Eliminar la cita de la base de datos
+        citaRepository.delete(citaExistente);
+
+        return construirRespuesta(citaExistente, "Cita cancelada");
     }
 
 }
